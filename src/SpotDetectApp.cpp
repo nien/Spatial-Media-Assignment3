@@ -26,7 +26,6 @@ class SpotDetectApp : public AppBasic
 	void setup();
 	void mouseDown( MouseEvent event );	
 	void mouseDrag( MouseEvent event );
-	void mouseUp( MouseEvent event );	
 	void prepareSettings( Settings *settings );
 	void keyDown( KeyEvent event ) { if ( event.getChar() == 'p' ) toggleParams = !toggleParams; }
 	void update();
@@ -38,58 +37,53 @@ class SpotDetectApp : public AppBasic
 	Channel		    mProcessChannel;
 	gl::Texture		mOutputTexture;
 
-	// Threshold value for edge detection.
+	// Threshold values.
 	int mEdgeThreshold;
-	
 	int mDetectThreshold;
 	
+	// Edge detection processing.
 	void edgeDetectProcess( Channel const &input, Channel &output, int threshold );
 
 	// Parameters for calibration.
 	params::InterfaceGl	mParams;
 	bool toggleParams;
 	
-	int mMenuToggle;
-	void cycleMenu() { mMenuToggle = ( mMenuToggle < 2 ) ? mMenuToggle + 1 : 0; }
+	// Support different views.
+	int  mViewToggle;
+	void cycleViews() { mViewToggle = ( mViewToggle < 2 ) ? mViewToggle + 1 : 0; }
 
-	int  mNumCameras, mCurrentCamera;
-	void cycleCamera();
+	// Support multiple cameras.
+	int  mCurrentCamera;
+	void cycleCameras();
 	
-	SpotImage *spotImage1;
-	SpotImage *spotImage2;
-	SpotImage *spotImage3;
-	int mSpotSelected;
-	
-	bool mSpot1On;
-	bool mSpot2On;
-	bool mSpot3On;
-	
-	Vec2i mInitialMouseDown, mCurrentMouseDown, mIntialSpotImage;
+	// Spot images and flags required for updating position and radius.
+	SpotImage *mSpotImage1, *mSpotImage2, *mSpotImage3;
+	int       mSpotSelected;
+	int       mInitialSpotRadius;
+	Vec2i     mInitialMouseDown, mCurrentMouseDown, mIntialSpotPt;
+	bool      mSpot1On, mSpot2On, mSpot3On;
 };
 
-void SpotDetectApp::cycleCamera()
+void SpotDetectApp::cycleCameras()
 {
+	const vector<Capture::DeviceRef> &devices = Capture::getDevices();
+	int   mNumCameras = devices.size();
+	
 	if ( mNumCameras < 2 )
 		return;
 	
 	mCapture.stop();
-	const vector<Capture::DeviceRef> &devices = Capture::getDevices();
-	
 	mCurrentCamera = ( mCurrentCamera < mNumCameras -1 ) ? mCurrentCamera + 1 : 0;
-	
-	mCapture = Capture( 640, 480, devices[mCurrentCamera] );
+	mCapture       = Capture( 640, 480, devices[mCurrentCamera] );
 	mCapture.start();
 }
 
 void SpotDetectApp::setup()
 {
 	try {
-		// Get list of devices.
 		const vector<Capture::DeviceRef> &devices = Capture::getDevices();
-		mNumCameras = devices.size();
 		mCurrentCamera = 0;
-		
-		mCapture = Capture( 640, 480, devices[mCurrentCamera] );
+		mCapture       = Capture( 640, 480, devices[mCurrentCamera] );
 		mCapture.start();
 	}
 	catch( ... ) { // failed to initialize the webcam, create a warning texture
@@ -105,37 +99,35 @@ void SpotDetectApp::setup()
 		mOutputTexture = gl::Texture( layout.render() );
 	}
 
+	// Create process channel.
 	mProcessChannel = Channel( 640, 480 );
 
-	// Initialize threshold value.
+	// Initialize threshold values.
 	mEdgeThreshold   = 30;
-	mDetectThreshold = 3;
-	mMenuToggle = 0;
-
-	gl::enableAlphaBlending( false );
-
+	mDetectThreshold = 2;
 	
+	// Setup params widget and flags.
 	mParams = params::InterfaceGl( "Spot Detection", Vec2i( 200, 160 ) );
-	mParams.addParam( "Edge Threshold", &mEdgeThreshold, "min=0.0 max=255.0 step=1.0 keyIncr=w keyDecr=s" );
-	mParams.addParam( "Detect Threshold", &mDetectThreshold, "min=0.0 max=100.0 step=1.0 keyIncr=q keyDecr=a" );
-	mParams.addButton( "View Toggle", std::bind( &SpotDetectApp::cycleMenu, this ) , "keyIncr=m");
-	mParams.addButton( "Camera Toggle", std::bind( &SpotDetectApp::cycleCamera, this ) , "keyIncr=c");
+	mParams.addParam(  "Edge Threshold",   &mEdgeThreshold, "min=0.0 max=255.0 step=1.0 keyIncr=w keyDecr=s" );
+	mParams.addParam(  "Detect Threshold", &mDetectThreshold, "min=0.0 max=100.0 step=1.0 keyIncr=q keyDecr=a" );
+	mParams.addButton( "View Toggle",      std::bind( &SpotDetectApp::cycleViews, this ) , "keyIncr=v");
+	mParams.addButton( "Camera Toggle",    std::bind( &SpotDetectApp::cycleCameras, this ) , "keyIncr=c");
 	mParams.hide();
+	toggleParams  = false;
+	mViewToggle   = 0;
 
-	
-	spotImage1 = new SpotImage( Vec2i( 100, 100 ), 40 );
-	spotImage2 = new SpotImage( Vec2i( 200, 200 ), 40 );
-	spotImage3 = new SpotImage( Vec2i( 300, 300 ), 40 );
-
-	mInitialMouseDown = Vec2i::zero();
-	mCurrentMouseDown = Vec2i::zero();
-
-	toggleParams = false;
+	// Create spots for detection.
+	// TODO: Put SpotImages into an array;
+	mSpotImage1   = new SpotImage( Vec2i( 100, 100 ), 40 );
+	mSpotImage2   = new SpotImage( Vec2i( 200, 200 ), 40 );
+	mSpotImage3   = new SpotImage( Vec2i( 300, 300 ), 40 );
 	mSpotSelected = 0;
-	
-	mSpot1On = false;
-	mSpot2On = false;
-	mSpot3On = false;
+	mSpot1On      = false;
+	mSpot2On      = false;
+	mSpot3On      = false;
+
+	// Support alpha channel setting.
+	gl::enableAlphaBlending( false );
 }
 
 void SpotDetectApp::prepareSettings( Settings *settings )
@@ -147,41 +139,74 @@ void SpotDetectApp::prepareSettings( Settings *settings )
 void SpotDetectApp::mouseDown( MouseEvent event )
 {
 	mCurrentMouseDown = mInitialMouseDown = event.getPos();
+	mSpotSelected     = 0;
 	
-	if ( Vec2i(spotImage1->getCenterPt()).distance(mInitialMouseDown) < spotImage1->getRadius() )
+	// TODO: Clean up code. Put SpotImages in array.	
+	if ( Vec2i(mSpotImage1->getCenterPt()).distance(mInitialMouseDown) < mSpotImage1->getRadius() )
 	{
-		mIntialSpotImage  = spotImage1->getCenterPt();
+		mInitialSpotRadius = mSpotImage1->getRadius(); 
+		mIntialSpotPt     = mSpotImage1->getCenterPt();
 		mSpotSelected     = 1;
 	}
-	else if ( Vec2i(spotImage2->getCenterPt()).distance(mInitialMouseDown) < spotImage2->getRadius() )
+	else if ( Vec2i(mSpotImage2->getCenterPt()).distance(mInitialMouseDown) < mSpotImage2->getRadius() )
 	{
-		mIntialSpotImage  = spotImage2->getCenterPt();
+		mInitialSpotRadius = mSpotImage2->getRadius(); 
+		mIntialSpotPt     = mSpotImage2->getCenterPt();
 		mSpotSelected     = 2;
 	}
-	else if ( Vec2i(spotImage3->getCenterPt()).distance(mInitialMouseDown) < spotImage3->getRadius() )
+	else if ( Vec2i(mSpotImage3->getCenterPt()).distance(mInitialMouseDown) < mSpotImage3->getRadius() )
 	{
-		mIntialSpotImage  = spotImage3->getCenterPt();
+		mInitialSpotRadius = mSpotImage3->getRadius(); 
+		mIntialSpotPt     = mSpotImage3->getCenterPt();
 		mSpotSelected     = 3;
 	}
-}
-
-void SpotDetectApp::mouseUp( MouseEvent event )
-{
-	mSpotSelected = 0;
 }
 
 void SpotDetectApp::mouseDrag( MouseEvent event )
 {
 	mCurrentMouseDown = event.getPos();
 
-	Vec2i offset = mCurrentMouseDown - mInitialMouseDown;
-
-	if ( mSpotSelected == 1 )
-		spotImage1->setCenterPt( mIntialSpotImage + offset );
+	// TODO: Clean up logic.
+	Vec2i posOffset = mCurrentMouseDown - mInitialMouseDown;
+	if ( mSpotSelected == 1 ) 
+	{
+		if ( event.isShiftDown() ) 
+		{
+			int radiusOffset = mSpotImage1->getCenterPt().distance(mCurrentMouseDown) - 
+				               mSpotImage1->getCenterPt().distance(mInitialMouseDown);
+			mSpotImage1->setRadius( mInitialSpotRadius + radiusOffset );
+		}
+		else 
+		{
+			mSpotImage1->setCenterPt( mIntialSpotPt + posOffset );
+		}
+	}
 	else if ( mSpotSelected == 2 )
-		spotImage2->setCenterPt( mIntialSpotImage + offset );
+	{
+		if ( event.isShiftDown() ) 
+		{
+			int radiusOffset = mSpotImage2->getCenterPt().distance(mCurrentMouseDown) - 
+			mSpotImage2->getCenterPt().distance(mInitialMouseDown);
+			mSpotImage2->setRadius( mInitialSpotRadius + radiusOffset );
+		}
+		else 
+		{
+			mSpotImage2->setCenterPt( mIntialSpotPt + posOffset );
+		}
+	}
 	else if ( mSpotSelected == 3 )
-		spotImage3->setCenterPt( mIntialSpotImage + offset );
+	{
+		if ( event.isShiftDown() ) 
+		{
+			int radiusOffset = mSpotImage3->getCenterPt().distance(mCurrentMouseDown) - 
+			mSpotImage3->getCenterPt().distance(mInitialMouseDown);
+			mSpotImage3->setRadius( mInitialSpotRadius + radiusOffset );
+		}
+		else 
+		{
+			mSpotImage3->setCenterPt( mIntialSpotPt + posOffset );
+		}
+	}
 }
 
 void SpotDetectApp::edgeDetectProcess( Channel const &input, Channel &output, int threshold )
@@ -214,11 +239,11 @@ void SpotDetectApp::edgeDetectProcess( Channel const &input, Channel &output, in
 			{
 				iterOut.v() = 255; 
 				
-				if ( iterIn.getPos().distance( spotImage1->getCenterPt() ) < spotImage1->getRadius() )
+				if ( iterIn.getPos().distance( mSpotImage1->getCenterPt() ) < mSpotImage1->getRadius() )
 					mSpot1Count++;
-				if ( iterIn.getPos().distance( spotImage2->getCenterPt() ) < spotImage2->getRadius() )
+				if ( iterIn.getPos().distance( mSpotImage2->getCenterPt() ) < mSpotImage2->getRadius() )
 					mSpot2Count++;
-				if ( iterIn.getPos().distance( spotImage3->getCenterPt() ) < spotImage3->getRadius() )
+				if ( iterIn.getPos().distance( mSpotImage3->getCenterPt() ) < mSpotImage3->getRadius() )
 					mSpot3Count++;
 			}
 			else
@@ -231,16 +256,13 @@ void SpotDetectApp::edgeDetectProcess( Channel const &input, Channel &output, in
 	float pct =  mDetectThreshold / 100.0f;
 	float area;
 	
-	console() << mSpot1Count << endl;
-	console() << pct * M_PI * spotImage1->getRadius() * spotImage1->getRadius() << endl;
-	
-	area = M_PI * spotImage1->getRadius() * spotImage1->getRadius(); 
+	area = M_PI * mSpotImage1->getRadius() * mSpotImage1->getRadius(); 
 	mSpot1On = ( mSpot1Count > pct * area ) ? true : false;
 
-	area = M_PI * spotImage2->getRadius() * spotImage2->getRadius(); 
+	area = M_PI * mSpotImage2->getRadius() * mSpotImage2->getRadius(); 
 	mSpot2On = ( mSpot2Count > pct * area ) ? true : false;
 	
-	area = M_PI * spotImage3->getRadius() * spotImage3->getRadius(); 
+	area = M_PI * mSpotImage3->getRadius() * mSpotImage3->getRadius(); 
 	mSpot3On = ( mSpot3Count > pct * area ) ? true : false;
 }
 
@@ -251,7 +273,6 @@ void SpotDetectApp::update()
 	
 	mVideoChannel = Channel( mCapture.getSurface() );
 	edgeDetectProcess( mVideoChannel, mProcessChannel, mEdgeThreshold );	
-
 }
 
 void SpotDetectApp::draw()
@@ -264,7 +285,7 @@ void SpotDetectApp::draw()
 	gl::color( Color( 1.0f, 1.0f, 1.0f ) );
 
 	
-	switch ( mMenuToggle ) 
+	switch ( mViewToggle ) 
 	{
 		case 0:
 			gl::draw( mVideoChannel, Vec2i( 0,0 ) );
@@ -277,31 +298,6 @@ void SpotDetectApp::draw()
 		case 2:
 			gl::draw( mProcessChannel, Vec2i( 0,0 ) );
 			gl::draw( mVideoChannel, Area( 10, 10, 170, 130 ) );
-			break;
-			
-		case 3:
-			//gl::draw( mProcessChannel , Area( 10, 10, 170, 130 ) );
-			
-			gl::draw( mProcessChannel, Vec2i( 0,0 ) );
-			
-//			if ( mSpot1Toler > 100 ) 
-//			{
-//				gl::color( ColorA( 1.0f, 0.0f, 0.0f, 1.0 ) );
-//				gl::drawSolidCircle( mSpot1, 50.0 );
-//			}
-//			
-//			if ( mSpot2Toler > 100 )
-//			{
-//				gl::color( ColorA( 0.0f, 1.0f, 0.0f, 1.0 ) );
-//				gl::drawSolidCircle( mSpot2, 50.0 );
-//			}
-//
-//			if ( mSpot3Toler > 100 )
-//			{
-//				gl::color( ColorA( 0.0f, 0.0f, 1.0f, 1.0 ) );
-//				gl::drawSolidCircle( mSpot3, 50.0 );
-//			}
-			
 			break;
 			
 		default:
@@ -320,25 +316,25 @@ void SpotDetectApp::draw()
 	}
 
 	if ( mSpot1On )
-		spotImage1->setColor( Color( 1.0f, 0.0f, 0.0f ) );
+		mSpotImage1->setColor( Color( 1.0f, 0.0f, 0.0f ) );
 	else
-		spotImage1->setColor( Color( 0.0f, 1.0f, 0.0f ) );
+		mSpotImage1->setColor( Color( 0.0f, 1.0f, 0.0f ) );
 
-	spotImage1->draw();
+	mSpotImage1->draw();
 
 	if ( mSpot2On )
-		spotImage2->setColor( Color( 1.0f, 0.0f, 0.0f ) );
+		mSpotImage2->setColor( Color( 1.0f, 0.0f, 0.0f ) );
 	else
-		spotImage2->setColor( Color( 0.0f, 1.0f, 0.0f ) );
+		mSpotImage2->setColor( Color( 0.0f, 1.0f, 0.0f ) );
 
-	spotImage2->draw();
+	mSpotImage2->draw();
 
 	if ( mSpot3On )
-		spotImage3->setColor( Color( 1.0f, 0.0f, 0.0f ) );
+		mSpotImage3->setColor( Color( 1.0f, 0.0f, 0.0f ) );
 	else
-		spotImage3->setColor( Color( 0.0f, 1.0f, 0.0f ) );
+		mSpotImage3->setColor( Color( 0.0f, 1.0f, 0.0f ) );
 
-	spotImage3->draw();
+	mSpotImage3->draw();
 }
 
 

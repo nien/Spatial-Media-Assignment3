@@ -19,7 +19,8 @@ class SpotImage
 	void      setCenterPt( ci::Vec2i centerPt );
 	ci::Vec2i getCenterPt() { return mCenterPt; }
 	void      setColor( ci::Color color ) { mColor = color; }
-	int       getRadius() { return mRadius; }	
+	int       getRadius() { return mRadius; }
+	void      setRadius( int radius ) { mRadius = radius; }
 	void      draw();
 	
   private:	
